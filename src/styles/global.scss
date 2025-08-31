@@ -1,0 +1,17 @@
+@use "./index" as *;
+@import url('https://fonts.googleapis.com/css2?family=Atma:wght@300;400;500;600;700&display=swap');
+@import url('reset.scss');
+
+body {
+    font-family: "Atma", sans-serif;
+    color: #fff;
+    font-size: 24px;
+    background-color: #2c0957;
+    background: radial-gradient(circle, #7f3fc0 0%, #2c0957 85%) no-repeat;
+    letter-spacing: 1px;
+    font-weight: 300;
+}
+
+#root {
+    height: 100dvh;
+}
