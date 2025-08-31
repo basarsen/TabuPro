@@ -1,7 +1,10 @@
+import { AuthProvider } from '@/auth/AuthProvider'
+import { Gate } from '@/components'
+
 export default function App() {
   return (
-    <div>App
-
-    </div>
+    <AuthProvider>
+      <Gate />
+    </AuthProvider>
   )
 }
