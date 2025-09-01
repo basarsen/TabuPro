@@ -1,0 +1,43 @@
+@use "../../styles/index.scss" as *;
+
+.formControl {
+    position: relative;
+}
+
+input:not([type=checkbox]):not([type=radio]),
+select {
+    font-family: inherit;
+    font-size: inherit;
+    background-color: $colorInputBg ;
+    color: #fff;
+    outline: none;
+    border-radius: 32px;
+    border: 2px solid $colorInputBorder;
+    transition: .5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    padding: 8px 24px;
+    width: 100%;
+    appearance: none;
+
+    &:focus {
+        border-color: $colorInputBorderActive;
+        box-shadow: 0 0 32px $colorPink;
+    }
+
+    &:focus+label,
+    &:valid+label {
+        top: -12px;
+        left: 0;
+        font-size: 16px;
+        opacity: 1;
+    }
+}
+
+.label {
+    position: absolute;
+    left: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #fff;
+    pointer-events: none;
+    opacity: .75;
+}

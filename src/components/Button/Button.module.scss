@@ -1,5 +1,108 @@
-@use '../../styles/index.scss' as *;
+@use "../../styles/index.scss" as *;
 
-.container {
-    color: $pink
+.btn {
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+    border: none;
+    padding: 8px 24px;
+    cursor: pointer;
+    border-radius: 36px;
+    transition: .5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    &.sm {
+        font-size: 16px;
+        border-width: 2px !important;
+
+        .icon {
+            font-size: 18px
+        }
+    }
+
+    &.primary {
+        color: #fff;
+
+        &.red {
+            background-color: $colorRed;
+        }
+
+        &.green {
+            background-color: $colorGreen;
+        }
+
+        &.blue {
+            background-color: $colorBlue;
+        }
+
+        &.orange {
+            background-color: $colorOrange;
+        }
+
+        &.pink {
+            background-color: $colorPink;
+        }
+
+        &.gradient {
+            background: linear-gradient(90deg, #CA38C1 0%, #6e6ff6 100%);
+        }
+    }
+
+    &.stroke {
+        background-color: transparent;
+        border: 3px solid;
+
+        &.red {
+            border-color: $colorRed;
+            color: $colorRed;
+        }
+
+        &.blue {
+            border-color: $colorBlue;
+            color: $colorBlue
+        }
+
+        &.pink {
+            border-color: $colorPink;
+            color: $colorPink;
+        }
+
+        &.green {
+            border-color: $colorGreen;
+            color: $colorGreen;
+        }
+
+        &.orange {
+            border-color: $colorOrange;
+            color: $colorOrange;
+        }
+    }
+
+    &:hover {
+        transform: scale(.9);
+    }
+
+    &.full-width {
+        width: 100%;
+        justify-content: center;
+    }
+
+    &.shadow {
+        box-shadow: 0 0 24px $colorShadowColorDark;
+    }
+
+    .icon {
+        margin-right: 8px;
+    }
+
+    &:disabled {
+        background-color: gray !important;
+        opacity: .5;
+    }
+
+    &:disabled:hover {
+        transform: scale(1);
+    }
 }

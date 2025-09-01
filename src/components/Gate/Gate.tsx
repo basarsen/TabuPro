@@ -1,10 +1,9 @@
 import { useAuth } from "@/auth/AuthProvider"
-import { Outlet } from "react-router"
+import { Room, SignIn } from "@/pages"
 
 export default function Gate() {
-    const { user, loading } = useAuth()
-
-    if (loading) return <div>Loading...</div>
-    if (!user) return <div>Login or Sign up</div>
-    return <Outlet />
+    const { user } = useAuth()
+    return (
+        !user ? <SignIn /> : <Room />
+    )
 }
