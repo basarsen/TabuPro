@@ -1,5 +1,4 @@
-// src/types/Room.ts
-export type TeamColor = 'Kırmızı' | 'Mavi'
+import type { Team } from './Team'
 
 export type Room = {
     id: string
@@ -8,13 +7,13 @@ export type Room = {
     stream_url: string | null
     round_second: number
     pass_limit: number
-    active_team: TeamColor | null
+    active_team: 'Kırmızı' | 'Mavi' | null
     explainer_id: string | null
     controller_id: string | null
     current_card_id: string | null
     used_card_ids: string[]
     passes_used: number
-    teams: unknown[]
+    teams: Team[]
     starts_at: string | null
     ends_at: string | null
     category_id: string

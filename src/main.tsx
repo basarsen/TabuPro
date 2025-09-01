@@ -1,8 +1,11 @@
-import './styles/global.scss'
 import { createRoot } from 'react-dom/client'
-import AppRoutes from './routes/AppRoutes'
-
+import { AuthProvider } from './auth/AuthProvider.tsx'
+import { RouterProvider } from 'react-router'
+import { router } from './routes/AppRoutes.tsx'
+import './styles/global.scss'
 
 createRoot(document.getElementById('root')!).render(
-  <AppRoutes />
+  <AuthProvider>
+    <RouterProvider router={router} />
+  </AuthProvider>
 )

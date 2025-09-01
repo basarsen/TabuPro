@@ -1,8 +1,10 @@
+// src/components/room/create/CreateRoomForm.tsx
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '@/auth/AuthProvider'
 import { fetchCategories } from '@/api/categories'
 import { createRoom } from '@/api/room'
 import type { Category } from '@/types'
+import type { TeamColor } from '@/types'
 
 type Props = {
     defaultRoundSecond?: number
@@ -15,7 +17,7 @@ export default function CreateRoomForm({
     defaultPassLimit = 3,
     onCreated,
 }: Props) {
-    const { user } = useAuth()
+    const { user, profile } = useAuth()
     const [categories, setCategories] = useState<Category[]>([])
     const [loadingCats, setLoadingCats] = useState(true)
     const [err, setErr] = useState<string | null>(null)
@@ -24,6 +26,9 @@ export default function CreateRoomForm({
     const [passLimit, setPassLimit] = useState(defaultPassLimit)
     const [categoryId, setCategoryId] = useState<string>('')
     const [streamUrl, setStreamUrl] = useState<string>('')
+
+    // YENİ: takım tercihi
+    const [preferredTeam, setPreferredTeam] = useState<TeamColor>('Kırmızı')
 
     useEffect(() => {
         ; (async () => {
@@ -55,15 +60,14 @@ export default function CreateRoomForm({
             pass_limit: passLimit,
             category_id: categoryId,
             stream_url: streamUrl.trim() || null,
+            preferred_team: preferredTeam,                 // <— YENİ
+            owner_username: profile?.username ?? null,     // <— YENİ
         })
         if (error) {
             setErr(error)
             return
         }
-        if (data) {
-            // örnek: yönlendirme ya da üst bileşene haber ver
-            onCreated?.(data.code, data.id)
-        }
+        if (data) onCreated?.(data.code, data.id)
     }
 
     if (loadingCats) return <div>Kategoriler yükleniyor…</div>
@@ -109,10 +113,34 @@ export default function CreateRoomForm({
                 />
             </label>
 
+            <fieldset style={{ border: 'none', padding: 0 }}>
+                <legend>Takım tercihi</legend>
+                <label style={{ marginRight: 12 }}>
+                    <input
+                        type="radio"
+                        name="prefTeam"
+                        value="Kırmızı"
+                        checked={preferredTeam === 'Kırmızı'}
+                        onChange={() => setPreferredTeam('Kırmızı')}
+                    />
+                    {' '}Kırmızı
+                </label>
+                <label>
+                    <input
+                        type="radio"
+                        name="prefTeam"
+                        value="Mavi"
+                        checked={preferredTeam === 'Mavi'}
+                        onChange={() => setPreferredTeam('Mavi')}
+                    />
+                    {' '}Mavi
+                </label>
+            </fieldset>
+
             <label>
                 Yayın URL (opsiyonel)
                 <input
-                    type="text"
+                    type="url"
                     placeholder="https://…"
                     value={streamUrl}
                     onChange={(e) => setStreamUrl(e.target.value)}

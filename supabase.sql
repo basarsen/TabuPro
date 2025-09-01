@@ -334,3 +334,453 @@ insert
     to authenticated
 with
     check (owner_id = auth.uid ());
+
+    -------
+
+    -- =====================================================================
+-- RPC: start_turn(room_code)
+--  - Kimler çağırabilir? authenticated (login olanlar)
+--  - Kim başlatabilir? Oda sahibi ya da teams içinde kayıtlı bir oyuncu
+--  - Ne yapar?
+--      * active_team boşsa 'Kırmızı' ile başlar
+--      * Sıradaki anlatan (explainer) ve kontrol (controller) oyuncularını belirler
+--      * starts_at = now(), ends_at = now() + round_second
+--      * passes_used = 0
+--      * rooms satırını günceller ve güncel satırı döner
+--  - Not: RLS, SECURITY DEFINER altında tablo sahibi tarafından bypass edilir
+-- =====================================================================
+
+create or replace function public.start_turn(p_room_code text)
+returns public.rooms
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_room public.rooms;
+  v_active team_color;
+  v_self uuid[];    -- aktif takım oyuncuları (sıralı)
+  v_other uuid[];   -- karşı takım oyuncuları (sıralı)
+  v_next_explainer uuid;
+  v_next_controller uuid;
+  v_uid uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  -- İlgili odayı kilitleyerek al
+  select *
+    into v_room
+    from public.rooms
+   where code = upper(p_room_code)
+   for update;
+
+  if not found then
+    raise exception 'room not found' using errcode = 'P0002';
+  end if;
+
+  -- Yetki: oda sahibi ya da teams içinde oyuncu olmalı
+  if v_room.owner_id <> v_uid and not exists (
+    select 1
+      from jsonb_array_elements(v_room.teams) t
+      cross join jsonb_array_elements(t->'players') with ordinality p(player, ord)
+     where (player->>'id')::uuid = v_uid
+  ) then
+    raise exception 'insufficient_privilege' using errcode = '42501';
+  end if;
+
+  -- Aktif takım: ilk turda boşsa Kırmızı
+  v_active := coalesce(v_room.active_team, 'Kırmızı'::team_color);
+
+  -- Aktif takım oyuncuları (sıralı)
+  select coalesce(array_agg((p->>'id')::uuid order by ord), '{}')
+    into v_self
+    from jsonb_array_elements(v_room.teams) t,
+         jsonb_array_elements(t->'players') with ordinality p(p, ord)
+   where t->>'color' = v_active::text;
+
+  -- Karşı takım oyuncuları (sıralı)
+  select coalesce(array_agg((p->>'id')::uuid order by ord), '{}')
+    into v_other
+    from jsonb_array_elements(v_room.teams) t,
+         jsonb_array_elements(t->'players') with ordinality p(p, ord)
+   where t->>'color' <> v_active::text;
+
+  -- Sıradaki anlatan: mevcut explainer_id'den sonra gelen
+  if array_length(v_self,1) is null then
+    v_next_explainer := null;
+  else
+    v_next_explainer := coalesce(
+      v_self[coalesce(array_position(v_self, v_room.explainer_id), 0) + 1],
+      v_self[1]
+    );
+  end if;
+
+  -- Sıradaki kontrol: karşı takımda mevcut controller_id'den sonra gelen
+  if array_length(v_other,1) is null then
+    v_next_controller := null;
+  else
+    v_next_controller := coalesce(
+      v_other[coalesce(array_position(v_other, v_room.controller_id), 0) + 1],
+      v_other[1]
+    );
+  end if;
+
+  update public.rooms
+     set active_team   = v_active,
+         explainer_id  = v_next_explainer,
+         controller_id = v_next_controller,
+         starts_at     = now(),
+         ends_at       = now() + make_interval(secs => round_second),
+         passes_used   = 0,
+         updated_at    = now()
+   where id = v_room.id
+   returning * into v_room;
+
+  return v_room;
+end;
+$$;
+
+-- Yetkiler: sadece authenticated çağırabilsin
+revoke all on function public.start_turn (text) from public;
+
+grant execute on function public.start_turn (text) to authenticated;
+
+-- (Opsiyonel) Açıklama
+comment on function public.start_turn (text) is 'Starts a turn for the given room code: rotates explainer/controller, sets starts_at/ends_at, resets passes_used.';
+
+-- =====================================================================
+-- Realtime Publication (idempotent): rooms tablosu yayında değilse ekle
+--  - Supabase varsayılan yayını: supabase_realtime
+--  - Tablo zaten yayındaysa sessizce geç
+-- =====================================================================
+do $$
+begin
+  perform 1
+    from pg_publication
+   where pubname = 'supabase_realtime';
+
+  if not found then
+    -- publication yoksa sessiz geç (local/dev ortamında olabilir)
+    return;
+  end if;
+
+  -- rooms zaten yayında ise duplicate_object fırlatır; yutalım
+  begin
+    execute 'alter publication supabase_realtime add table public.rooms';
+  exception
+    when duplicate_object then
+      null;
+    when undefined_object then
+      -- tablo ya da publication yoksa sessiz geç
+      null;
+  end;
+end$$;
+
+-- =====================================================================
+-- RPC: finish_turn(room_code)
+--  - Kimler çağırabilir? authenticated (login olanlar)
+--  - Yetki: Oda sahibi ya da rooms.teams içindeki bir oyuncu
+--  - Ne yapar?
+--      * active_team'i karşı takıma çevirir (Kırmızı <-> Mavi)
+--      * current_card_id doluysa used_card_ids'e ekler (duplicate'siz)
+--      * starts_at/ends_at'i sıfırlar, passes_used=0 yapar
+--      * güncellenmiş rooms satırını döner
+-- =====================================================================
+
+create or replace function public.finish_turn(p_room_code text)
+returns public.rooms
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_room public.rooms;
+
+v_uid uuid := auth.uid ();
+
+v_next team_color;
+
+begin
+  if v_uid is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  -- Odayı kilitleyerek al
+  select *
+    into v_room
+    from public.rooms
+   where code = upper(p_room_code)
+   for update;
+
+  if not found then
+    raise exception 'room not found' using errcode = 'P0002';
+  end if;
+
+  -- Yetki: owner veya teams içinde oyuncu olmalı
+  if v_room.owner_id <> v_uid and not exists (
+    select 1
+      from jsonb_array_elements(v_room.teams) t
+      cross join jsonb_array_elements(t->'players') with ordinality p(player, ord)
+     where (player->>'id')::uuid = v_uid
+  ) then
+    raise exception 'insufficient_privilege' using errcode = '42501';
+  end if;
+
+  -- Sıradaki aktif takım (boş ise Kırmızı kabul edip Mavi'ye geçir)
+  v_next := case coalesce(v_room.active_team, 'Kırmızı'::team_color)
+              when 'Kırmızı' then 'Mavi'::team_color
+              else 'Kırmızı'::team_color
+            end;
+
+  -- Güncelleme:
+  -- - current_card_id varsa used_card_ids'e bir kez ekle
+  -- - zaman ve sayaçları sıfırla
+  update public.rooms
+     set active_team     = v_next,
+         used_card_ids   = case
+                             when v_room.current_card_id is not null
+                              and not (v_room.current_card_id = any(used_card_ids))
+                             then used_card_ids || v_room.current_card_id
+                             else used_card_ids
+                           end,
+         current_card_id  = null,
+         starts_at        = null,
+         ends_at          = null,
+         passes_used      = 0,
+         updated_at       = now()
+   where id = v_room.id
+   returning * into v_room;
+
+  return v_room;
+end;
+
+$$;
+
+-- Yetkiler: sadece authenticated çağırabilsin
+revoke all on function public.finish_turn (text) from public;
+
+grant execute on function public.finish_turn (text) to authenticated;
+
+comment on function public.finish_turn (text) is 'Finishes the current turn: toggles active_team, appends current_card_id to used_card_ids if present, clears timers and counters, and returns updated room row.';
+
+create or replace function public.server_now()
+returns timestamptz language sql stable as $$ select now() $$;
+
+grant
+execute on function public.server_now () to anon,
+authenticated;
+
+-----------------------
+
+-- =====================================================================
+-- RPC: draw_card(room_code)
+--  - Kimler çağırabilir? authenticated
+--  - Yetki: Oda sahibi ya da rooms.teams içinde kayıtlı bir oyuncu
+--  - Ne yapar?
+--      * rooms.category_id içinden, used_card_ids + current_card_id HARİÇ rastgele kart seçer
+--      * daha önce görünen current_card_id varsa used_card_ids'e EKLER (duplicate'siz)
+--      * rooms.current_card_id'yi yeni kartla günceller
+--      * SEÇİLEN kartı (public.cards satırı) döner
+--      * Uygun kart yoksa "no_available_card" hatası fırlatır
+-- =====================================================================
+
+create or replace function public.draw_card(p_room_code text)
+returns public.cards
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_room public.rooms;
+  v_card public.cards;
+  v_uid  uuid := auth.uid();
+begin
+  if v_uid is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  -- Odayı kilitleyerek al
+  select *
+    into v_room
+    from public.rooms
+   where code = upper(p_room_code)
+   for update;
+
+  if not found then
+    raise exception 'room not found' using errcode = 'P0002';
+  end if;
+
+  -- Yetki kontrolü: owner veya teams içinde oyuncu olmalı
+  if v_room.owner_id <> v_uid and not exists (
+    select 1
+      from jsonb_array_elements(v_room.teams) t
+      cross join jsonb_array_elements(t->'players') with ordinality p(player, ord)
+     where (player->>'id')::uuid = v_uid
+  ) then
+    raise exception 'insufficient_privilege' using errcode = '42501';
+  end if;
+
+  -- Kategori içinden, used_card_ids + current_card_id HARİÇ rastgele kart seç
+  select c.*
+    into v_card
+    from public.cards c
+   where c.category_id = v_room.category_id
+     and (v_room.current_card_id is null or c.id <> v_room.current_card_id)
+     and c.id <> all(v_room.used_card_ids)  -- boş array ise zaten TRUE olur
+   order by random()
+   limit 1;
+
+  if not found then
+    raise exception 'no_available_card' using errcode = 'P0001';
+  end if;
+
+  -- Önce: mevcut current_card_id varsa ve used_card_ids'te yoksa ekle
+  update public.rooms
+     set used_card_ids = case
+                           when v_room.current_card_id is not null
+                             and not (v_room.current_card_id = any(used_card_ids))
+                           then used_card_ids || v_room.current_card_id
+                           else used_card_ids
+                         end,
+         current_card_id = v_card.id,
+         updated_at      = now()
+   where id = v_room.id;
+
+  return v_card;
+end;
+$$;
+
+revoke all on function public.draw_card (text) from public;
+
+grant execute on function public.draw_card (text) to authenticated;
+
+comment on function public.draw_card (text) is 'Draws a new card for the room: excludes used_card_ids and current_card_id, appends previous current card to used_card_ids, returns the selected card row.';
+
+----------------------
+
+-- Önce (varsa) draw_card'ı kaldır
+drop function if exists public.draw_card (text);
+
+-- start_turn: tur başlatırken otomatik kart seçsin
+create or replace function public.start_turn(p_room_code text)
+returns public.rooms
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_room public.rooms;
+  v_active team_color;
+  v_self uuid[];    -- aktif takım oyuncuları (sıralı)
+  v_other uuid[];   -- karşı takım oyuncuları (sıralı)
+  v_next_explainer uuid;
+  v_next_controller uuid;
+  v_uid uuid := auth.uid();
+  v_card public.cards;
+begin
+  if v_uid is null then
+    raise exception 'unauthenticated' using errcode = '28000';
+  end if;
+
+  -- Odayı kilitleyerek al
+  select *
+    into v_room
+    from public.rooms
+   where code = upper(p_room_code)
+   for update;
+
+  if not found then
+    raise exception 'room not found' using errcode = 'P0002';
+  end if;
+
+  -- Yetki: owner veya odadaki oyuncu
+  if v_room.owner_id <> v_uid and not exists (
+    select 1
+      from jsonb_array_elements(v_room.teams) t
+      cross join jsonb_array_elements(t->'players') with ordinality p(player, ord)
+     where (player->>'id')::uuid = v_uid
+  ) then
+    raise exception 'insufficient_privilege' using errcode = '42501';
+  end if;
+
+  -- Aktif takım: ilk turda boşsa Kırmızı
+  v_active := coalesce(v_room.active_team, 'Kırmızı'::team_color);
+
+  -- Aktif takım oyuncuları (sıralı)
+  select coalesce(array_agg((p->>'id')::uuid order by ord), '{}')
+    into v_self
+    from jsonb_array_elements(v_room.teams) t,
+         jsonb_array_elements(t->'players') with ordinality p(p, ord)
+   where t->>'color' = v_active::text;
+
+  -- Karşı takım oyuncuları (sıralı)
+  select coalesce(array_agg((p->>'id')::uuid order by ord), '{}')
+    into v_other
+    from jsonb_array_elements(v_room.teams) t,
+         jsonb_array_elements(t->'players') with ordinality p(p, ord)
+   where t->>'color' <> v_active::text;
+
+  -- Sıradaki roller
+  if array_length(v_self,1) is null then
+    v_next_explainer := null;
+  else
+    v_next_explainer := coalesce(
+      v_self[coalesce(array_position(v_self, v_room.explainer_id), 0) + 1],
+      v_self[1]
+    );
+  end if;
+
+  if array_length(v_other,1) is null then
+    v_next_controller := null;
+  else
+    v_next_controller := coalesce(
+      v_other[coalesce(array_position(v_other, v_room.controller_id), 0) + 1],
+      v_other[1]
+    );
+  end if;
+
+  -- Kategori içinden, used_card_ids + current_card_id HARİÇ rastgele kart seç
+  select c.*
+    into v_card
+    from public.cards c
+   where c.category_id = v_room.category_id
+     and (v_room.current_card_id is null or c.id <> v_room.current_card_id)
+     and c.id <> all(v_room.used_card_ids)
+   order by random()
+   limit 1;
+
+  if not found then
+    raise exception 'no_available_card' using errcode = 'P0001';
+  end if;
+
+  -- Güncelle: zamanlar, roller, kart ve used_card_ids (önceki kartı ekle)
+  update public.rooms
+     set active_team   = v_active,
+         explainer_id  = v_next_explainer,
+         controller_id = v_next_controller,
+         starts_at     = now(),
+         ends_at       = now() + make_interval(secs => round_second),
+         passes_used   = 0,
+         used_card_ids = case
+                           when v_room.current_card_id is not null
+                             and not (v_room.current_card_id = any(used_card_ids))
+                           then used_card_ids || v_room.current_card_id
+                           else used_card_ids
+                         end,
+         current_card_id = v_card.id,
+         updated_at     = now()
+   where id = v_room.id
+   returning * into v_room;
+
+  return v_room;
+end;
+$$;
+
+-- Yetkiler (güvence altına al)
+revoke all on function public.start_turn (text) from public;
+
+grant execute on function public.start_turn (text) to authenticated;
+
+comment on function public.start_turn (text) is 'Starts a turn and automatically draws a new card (category-scoped, no repeats).';
