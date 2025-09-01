@@ -7,18 +7,17 @@ export default function JoinRoomByCode() {
 
     function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
-        const cleaned = code.trim().toUpperCase()
-        if (cleaned.length === 6) navigate(`/room/${cleaned}`)
+        const trimmed = code.trim().toUpperCase()
+        navigate(`/room/${trimmed}`)
     }
 
     return (
-        <form onSubmit={handleSubmit} style={{ display: 'flex', gap: 8 }}>
+        <form onSubmit={handleSubmit}>
             <input
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 placeholder="6 haneli kod"
                 maxLength={6}
-                style={{ textTransform: 'uppercase', letterSpacing: 2 }}
             />
             <button type="submit">Odaya Git</button>
         </form>

@@ -1,4 +1,3 @@
-// src/api/room.ts
 import { supabase } from '@/lib/supabase'
 import type { Room, Team, TeamPlayer, TeamColor } from '@/types'
 
@@ -17,14 +16,12 @@ export async function createRoom(
 ): Promise<{ data: Room | null; error: string | null }> {
     const ownerPlayer: TeamPlayer = { id: ownerId, username: input.owner_username ?? null }
 
-    // Dizileri açıkça TeamPlayer[] olarak başlatıyoruz
     const red: Team = { color: 'Kırmızı', players: [], score: 0 }
     const blue: Team = { color: 'Mavi', players: [], score: 0 }
 
     const preferred = input.preferred_team ?? 'Kırmızı'
     const target = preferred === 'Mavi' ? blue : red
 
-    // push yerine doğrudan atama (never[]/callable karışıklığını önler)
     target.players = [ownerPlayer]
 
     const payload = {
@@ -45,14 +42,22 @@ export async function createRoom(
     return { data: (data as Room) ?? null, error: error?.message ?? null }
 }
 
-
 export async function getRoomByCode(code: string) {
     const { data, error } = await supabase
         .from('rooms')
-        .select('id, code, owner_id, stream_url, round_second, pass_limit, active_team, explainer_id, controller_id, current_card_id, used_card_ids, passes_used, teams, starts_at, ends_at, category_id, created_at, updated_at')
+        .select('id, code,rooms_teams_with_usernames, owner_id, stream_url, round_second, pass_limit, active_team, explainer_id, controller_id, current_card_id, used_card_ids, passes_used, teams, starts_at, ends_at, category_id, created_at, updated_at')
         .eq('code', code.toUpperCase())
-        .maybeSingle() // ⬅️ kritik değişiklik
+        .maybeSingle()
 
     return { data: (data as Room) ?? null, error: error?.message ?? null }
+}
+
+export async function leaveRoom(roomId: string): Promise<{ error: string | null }> {
+    const { error } = await supabase.rpc('leave_room', { p_room_id: roomId })
+    return { error: error?.message ?? null }
+}
+
+export async function joinRoom(roomId: string) {
+    await supabase.rpc('join_room', { p_room_id: roomId, p_team: 'Kırmızı' })
 }
 

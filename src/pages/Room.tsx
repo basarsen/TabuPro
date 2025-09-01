@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useRoomByCode } from '@/hooks/useRoom'
 import StartTurnPopup from '@/components/room/StartTurnPopup'
@@ -7,17 +7,22 @@ import { startTurn, finishTurn, passCard, markCorrect, markTaboo } from '@/api/r
 import { useTurnTimer } from '@/hooks/useTurnTimer'
 import { Card } from '@/components'
 import { useAuth } from '@/auth/AuthProvider'
+import { joinRoom, leaveRoom } from '@/api/room'
 
 export default function RoomPage() {
     const { code } = useParams<{ code: string }>()
     const { room, loading, error } = useRoomByCode(code)
 
-    const { user } = useAuth()
+    useEffect(() => {
+        if (room?.id)
+            joinRoom(room.id)
+    }, [room?.id])
+
+    const { user, profile, signOut } = useAuth()
 
     const [showStartPopup, setShowStartPopup] = useState(false)
     const [busy, setBusy] = useState<'start' | 'pass' | 'correct' | 'taboo' | null>(null)
     const [errText, setErrText] = useState<string | null>(null)
-    const autoFinishingRef = useRef(false)
 
     const isTurnActive = useMemo(
         () => !!room?.starts_at && !!room?.ends_at,
@@ -26,20 +31,11 @@ export default function RoomPage() {
     const hasCard = !!room?.current_card_id
     const canPass = isTurnActive && hasCard && (room!.passes_used < room!.pass_limit)
 
-    // Timer'ı display için TurnTimer'da da kullanıyoruz; burada expire callback ile otomatik finish çağırıyoruz.
     useTurnTimer(room?.starts_at, room?.ends_at, 250, async () => {
-        if (!code || autoFinishingRef.current) return
-        autoFinishingRef.current = true
-        try {
-            const { error } = await finishTurn(code)
-            if (error) {
-                // başka biri bitirdiyse "turn_not_active" gelebilir; ekrana yansıtma şart değil
-                setErrText(error)
-            }
-        } finally {
-            // realtime ile yeni state akınca tekrar false'a dönmesine gerek yok;
-            // ama güvenli olması için 1 sn sonra kilidi açalım
-            setTimeout(() => { autoFinishingRef.current = false }, 1000)
+        if (!code) return
+        const { error } = await finishTurn(code)
+        if (error) {
+            setErrText(error)
         }
     })
 
@@ -66,10 +62,12 @@ export default function RoomPage() {
     return (
         <div style={{ display: 'grid', gap: 12 }}>
             <h1>Oda {room.code}</h1>
+            <button onClick={() => leaveRoom(room.id)}>Ayrıl</button>
 
             <TurnTimer startsAt={room.starts_at} endsAt={room.ends_at} />
 
             <Card room={room} />
+            <button onClick={signOut}>ÇıkHesap</button>
 
             <div>
                 <b>Skor:</b>{' '}
@@ -89,6 +87,8 @@ export default function RoomPage() {
                 <button onClick={() => run('taboo')} disabled={busy !== null || !isTurnActive || !hasCard}>Tabu</button>
                 <button onClick={() => run('correct')} disabled={busy !== null || !isTurnActive || !hasCard}>Doğru</button>
             </div>
+
+            {JSON.stringify(room.rooms_teams_with_usernames)}
 
             {errText && <div style={{ color: 'tomato' }}>Hata: {errText}</div>}
 

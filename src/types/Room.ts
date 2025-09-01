@@ -14,6 +14,7 @@ export type Room = {
     used_card_ids: string[]
     passes_used: number
     teams: Team[]
+    rooms_teams_with_usernames: Team[]
     starts_at: string | null
     ends_at: string | null
     category_id: string

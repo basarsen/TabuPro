@@ -6,11 +6,7 @@ export default function CreateRoom() {
     return (
         <div style={{ padding: 16 }}>
             <h1>Yeni Oda</h1>
-            <CreateRoomForm
-                defaultRoundSecond={90}
-                defaultPassLimit={3}
-                onCreated={(code) => navigate(`/room/${code}`)}
-            />
+            <CreateRoomForm onCreated={(code) => navigate(`/room/${code}`)} />
         </div>
     )
 }

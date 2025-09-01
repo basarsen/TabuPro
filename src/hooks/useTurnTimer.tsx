@@ -1,4 +1,3 @@
-// src/hooks/useTurnTimer.ts
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 export type TurnTimerState = {
@@ -6,12 +5,11 @@ export type TurnTimerState = {
     remainingMs: number
     remainingSec: number
     totalMs: number
-    progress: number // 0..1 (geçen oran)
+    progress: number
     mmss: string
     onExpire?: () => void
 }
 
-/** ISO tarihleri alır, client saatine göre geri sayım üretir. */
 export function useTurnTimer(
     startsAt?: string | null,
     endsAt?: string | null,
@@ -38,7 +36,6 @@ export function useTurnTimer(
 
     useEffect(() => {
         if (!Number.isFinite(endMs)) return
-        // interval sadece aktifken çalışsın
         if (endMs <= Date.now()) return
 
         timerRef.current = window.setInterval(() => setNow(Date.now()), tickMs)
@@ -56,7 +53,7 @@ export function useTurnTimer(
             firedRef.current = false
             return
         }
-        // aktiften pasife geçiş
+
         if (wasActiveRef.current && !active && !firedRef.current) {
             firedRef.current = true
             onExpire?.()

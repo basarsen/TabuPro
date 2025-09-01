@@ -1,12 +1,9 @@
-// src/hooks/useRoomPresence.ts
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/auth/AuthProvider'
 
 export type PresenceState = {
     onlineIds: string[]
-    // presence payload’larını da okumak istersen:
-    // details: Record<string, Array<{ user_id: string; [k: string]: any }>>
 }
 
 export function useRoomPresence(roomId?: string) {
@@ -22,11 +19,9 @@ export function useRoomPresence(roomId?: string) {
 
         const sync = () => {
             const raw = channel.presenceState()
-            // raw: { [presenceKey: string]: Array<payload> }
             const ids = Object.keys(raw)
             setState({
-                onlineIds: ids,
-                // details: raw as any,
+                onlineIds: ids
             })
         }
 
@@ -36,7 +31,6 @@ export function useRoomPresence(roomId?: string) {
                 if (status === 'SUBSCRIBED') {
                     channel.track({
                         user_id: user?.id ?? null,
-                        // örn: username: profile?.username ?? null,
                         at: new Date().toISOString(),
                     })
                 }

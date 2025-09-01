@@ -5,25 +5,34 @@ import type { Room, Team, TeamPlayer, TeamColor } from '@/types'
 type Props = {
     open: boolean
     room: Room
-    currentUserId?: string | null   // ⬅️ eklendi
+    currentUserId?: string | null
     onClose?: () => void
     onStart?: () => void
 }
 
-function resolveName(p?: TeamPlayer | null) {
+const resolveName = (p?: TeamPlayer | null) => {
     if (!p) return '—'
     return (p.username && p.username.trim().length) ? p.username : p.id.slice(0, 6)
 }
-const getTeam = (teams: Team[], color: TeamColor) => teams.find(t => t.color === color) ?? null
-const otherTeam = (c: TeamColor) => (c === 'Kırmızı' ? 'Mavi' : 'Kırmızı')
-function nextPlayer(team: Team | null, currentId?: string | null): TeamPlayer | null {
+
+const getTeam = (teams: Team[], color: TeamColor) => {
+    return teams.find(t => t.color === color) ?? null
+}
+
+const otherTeam = (c: TeamColor) => {
+    return (c === 'Kırmızı' ? 'Mavi' : 'Kırmızı')
+}
+
+const nextPlayer = (team: Team | null, currentId?: string | null): TeamPlayer | null => {
     if (!team || team.players.length === 0) return null
     if (!currentId) return team.players[0]
+
     const i = team.players.findIndex(p => p.id === currentId)
     return team.players[(i === -1 ? 0 : (i + 1) % team.players.length)]
 }
 
 export default function StartTurnPopup({ open, room, currentUserId, onClose, onStart }: Props) {
+
     const { nextTeamColor, nextExplainer, nextController, startAllowed } = useMemo(() => {
         const color: TeamColor = (room.active_team ?? 'Kırmızı') as TeamColor
         const explainerTeam = getTeam(room.teams, color)

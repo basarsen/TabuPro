@@ -1,77 +1,56 @@
-// src/components/room/create/CreateRoomForm.tsx
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/auth/AuthProvider'
 import { fetchCategories } from '@/api/categories'
 import { createRoom } from '@/api/room'
 import type { Category } from '@/types'
 import type { TeamColor } from '@/types'
 
-type Props = {
+type CreateRoomFormProps = {
     defaultRoundSecond?: number
     defaultPassLimit?: number
-    onCreated?: (roomCode: string, roomId: string) => void
+    onCreated: (roomCode: string, roomId: string) => void
 }
 
 export default function CreateRoomForm({
-    defaultRoundSecond = 90,
+    defaultRoundSecond = 10,
     defaultPassLimit = 3,
-    onCreated,
-}: Props) {
+    onCreated
+}: CreateRoomFormProps) {
     const { user, profile } = useAuth()
-    const [categories, setCategories] = useState<Category[]>([])
-    const [loadingCats, setLoadingCats] = useState(true)
-    const [err, setErr] = useState<string | null>(null)
 
+    const [categories, setCategories] = useState<Category[]>([])
+    const [loading, setLoading] = useState(true)
     const [roundSecond, setRoundSecond] = useState(defaultRoundSecond)
     const [passLimit, setPassLimit] = useState(defaultPassLimit)
     const [categoryId, setCategoryId] = useState<string>('')
     const [streamUrl, setStreamUrl] = useState<string>('')
-
-    // YENİ: takım tercihi
     const [preferredTeam, setPreferredTeam] = useState<TeamColor>('Kırmızı')
 
     useEffect(() => {
-        ; (async () => {
-            const { data, error } = await fetchCategories()
-            if (error) setErr(error)
-            else setCategories(data)
-            setLoadingCats(false)
-        })()
+        load()
     }, [])
 
-    const canSubmit = useMemo(
-        () =>
-            !!user?.id &&
-            roundSecond > 0 &&
-            passLimit >= 0 &&
-            categoryId.length > 0 &&
-            !loadingCats,
-        [user?.id, roundSecond, passLimit, categoryId, loadingCats]
-    )
+    const load = async () => {
+        const { data } = await fetchCategories()
+        setCategories(data)
+        setLoading(false)
+    }
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault()
-        if (!user?.id) {
-            setErr('Oturum bulunamadı.')
-            return
-        }
-        const { data, error } = await createRoom(user.id, {
+        const { data } = await createRoom(user!.id, {
             round_second: roundSecond,
             pass_limit: passLimit,
             category_id: categoryId,
             stream_url: streamUrl.trim() || null,
-            preferred_team: preferredTeam,                 // <— YENİ
-            owner_username: profile?.username ?? null,     // <— YENİ
+            preferred_team: preferredTeam,
+            owner_username: profile?.username ?? null
         })
-        if (error) {
-            setErr(error)
-            return
-        }
-        if (data) onCreated?.(data.code, data.id)
+
+        if (data) onCreated(data.code, data.id)
     }
 
-    if (loadingCats) return <div>Kategoriler yükleniyor…</div>
-    if (err) return <div style={{ color: 'tomato' }}>Hata: {err}</div>
+    if (loading) return <div>Kategoriler yükleniyor…</div>
 
     return (
         <form onSubmit={handleSubmit} style={{ display: 'grid', gap: 12, maxWidth: 420 }}>
@@ -123,7 +102,7 @@ export default function CreateRoomForm({
                         checked={preferredTeam === 'Kırmızı'}
                         onChange={() => setPreferredTeam('Kırmızı')}
                     />
-                    {' '}Kırmızı
+                    Kırmızı
                 </label>
                 <label>
                     <input
@@ -133,7 +112,7 @@ export default function CreateRoomForm({
                         checked={preferredTeam === 'Mavi'}
                         onChange={() => setPreferredTeam('Mavi')}
                     />
-                    {' '}Mavi
+                    Mavi
                 </label>
             </fieldset>
 
@@ -147,7 +126,7 @@ export default function CreateRoomForm({
                 />
             </label>
 
-            <button type="submit" disabled={!canSubmit}>
+            <button type="submit">
                 Oda Oluştur
             </button>
         </form>

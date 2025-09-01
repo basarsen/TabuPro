@@ -57,7 +57,7 @@ export default function SignIn() {
                 <div className='text-center'>Hesabın yok mu?</div>
                 <Button
                     type='button'
-                    label='Kayıt ol'
+                    label='Gir'
                     color='gradient'
                 />
             </form>

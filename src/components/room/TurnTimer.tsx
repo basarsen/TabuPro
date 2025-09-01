@@ -1,12 +1,12 @@
 // src/components/room/TurnTimer.tsx
 import { useTurnTimer } from '@/hooks/useTurnTimer'
 
-type Props = {
+type TurnTimerProps = {
     startsAt?: string | null
     endsAt?: string | null
 }
 
-export default function TurnTimer({ startsAt, endsAt }: Props) {
+export default function TurnTimer({ startsAt, endsAt }: TurnTimerProps) {
     const { active, mmss, progress } = useTurnTimer(startsAt, endsAt)
 
     if (!active) {
