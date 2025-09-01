@@ -18,12 +18,9 @@ export default function SignIn() {
 
         setSubmitting(true)
         try {
-            alert()
-
             const { error } = await signIn(email, password)
             if (error)
                 toast.error('E-posta veya şifre hatalı')
-
 
         } catch (err: any) {
             toast.error(err?.message ?? 'Bir hata oluştu')

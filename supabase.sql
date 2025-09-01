@@ -141,3 +141,196 @@ grant
 execute on function public.create_profile (text) to authenticated;
 
 COMMIT;
+
+-- Kategori ve Kart tablolarının oluşturulması
+
+-- UUID üretimi için (Supabase'te genelde açıktır ama garanti edelim)
+create extension if not exists pgcrypto;
+
+-- ========== TABLES ==========
+
+-- categories
+create table if not exists public.categories (
+    id uuid primary key default gen_random_uuid (),
+    name text not null,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+);
+
+-- case-insensitive unique index for category name
+create unique index if not exists categories_name_unique_ci on public.categories (lower(name));
+
+-- cards
+create table if not exists public.cards (
+  id           uuid primary key default gen_random_uuid(),
+  word         text not null,
+  taboo_words  text[] not null
+               check (array_length(taboo_words, 1) is not null and array_length(taboo_words, 1) >= 3),
+  category_id  uuid not null references public.categories(id) on delete cascade,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- aynı kategoride aynı kelimeyi (case-insensitive) engellemek için unique index
+create unique index if not exists cards_word_unique_per_category_ci on public.cards (lower(word), category_id);
+
+-- updated_at otomatik güncelleme
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
+drop trigger if exists trg_categories_set_updated_at on public.categories;
+
+create trigger trg_categories_set_updated_at
+before update on public.categories
+for each row execute function public.set_updated_at();
+
+drop trigger if exists trg_cards_set_updated_at on public.cards;
+
+create trigger trg_cards_set_updated_at
+before update on public.cards
+for each row execute function public.set_updated_at();
+
+-- ========== RLS ==========
+
+alter table public.categories enable row level security;
+
+alter table public.cards enable row level security;
+
+-- sadece SELECT (client read-only)
+drop policy if exists categories_read_all on public.categories;
+
+create policy categories_read_all on public.categories for
+select to anon, authenticated using (true);
+
+drop policy if exists cards_read_all on public.cards;
+
+create policy cards_read_all on public.cards for
+select to anon, authenticated using (true);
+
+-- Rooms tablosu oluşturma
+
+-- UUID ve random bytes için
+create extension if not exists pgcrypto;
+
+-- Takım enumu
+do $$
+begin
+  if not exists (select 1 from pg_type where typname = 'team_color') then
+    create type team_color as enum ('Kırmızı', 'Mavi');
+
+end if;
+
+end $$;
+
+-- updated_at için ortak trigger fonksiyonu
+create or replace function public.set_updated_at()
+returns trigger language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end $$;
+
+-- ROOMS
+
+
+create table if not exists public.rooms (
+  id               uuid primary key default gen_random_uuid(),
+  code             text not null
+                     default upper(encode(gen_random_bytes(3), 'hex')),
+  owner_id         uuid not null references auth.users(id) on delete cascade,
+  stream_url       text null,
+
+  round_second     integer not null check (round_second > 0),
+  pass_limit       integer not null check (pass_limit >= 0),
+
+  active_team      team_color null,
+  explainer_id     uuid null references auth.users(id) on delete set null,
+  controller_id    uuid null references auth.users(id) on delete set null,
+
+  current_card_id  uuid null references public.cards(id) on delete set null,
+  used_card_ids    uuid[] not null default '{}',
+  passes_used      integer not null default 0 check (passes_used >= 0),
+
+  teams            jsonb not null default '[]',
+  starts_at        timestamptz null,
+  ends_at          timestamptz null,
+
+  category_id      uuid not null references public.categories(id) on delete restrict,
+
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+
+-- code formatı ve benzersizlik
+constraint rooms_code_format check (code ~ '^[0-9A-F]{6}$'),
+constraint rooms_code_unique unique (code),
+
+-- teams alanı bir JSON array olmalı
+constraint rooms_teams_is_array check (
+    jsonb_typeof (teams) = 'array'
+),
+
+-- zaman tutarlılığı (ikisi de doluysa ends_at >= starts_at)
+constraint rooms_time_order check (
+    starts_at is null
+    or ends_at is null
+    or ends_at >= starts_at
+),
+
+-- current_card_id, used_card_ids içinde olmamalı (varsa)
+constraint rooms_current_not_used check (
+    current_card_id is null
+    or not(
+        current_card_id = any (used_card_ids)
+    )
+),
+
+-- passes_used, pass_limit'i aşmasın (ikisi de doluysa)
+constraint rooms_pass_limit_guard check (
+    pass_limit is null or passes_used <= pass_limit
+  )
+);
+
+-- updated_at trigger
+drop trigger if exists trg_rooms_set_updated_at on public.rooms;
+
+create trigger trg_rooms_set_updated_at
+before update on public.rooms
+for each row execute function public.set_updated_at();
+
+-- === RLS: client read-only ===
+alter table public.rooms enable row level security;
+
+drop policy if exists rooms_read_all on public.rooms;
+
+create policy rooms_read_all on public.rooms for
+select to anon, authenticated using (true);
+
+-- (Opsiyonel) Realtime yayınını aç — hata verirse sessiz yut
+do $$ begin perform 1
+from pg_publication
+where
+    pubname = 'supabase_realtime';
+
+if found then
+execute 'alter publication supabase_realtime add table public.rooms';
+
+end if;
+
+exception when others then
+-- publication yoksa sorun değil
+null;
+
+end $$;
+
+-- rooms: sadece INSERT izni (authenticated), owner_id = auth.uid() şartı
+drop policy if exists rooms_insert_own on public.rooms;
+
+create policy rooms_insert_own on public.rooms for
+insert
+    to authenticated
+with
+    check (owner_id = auth.uid ());

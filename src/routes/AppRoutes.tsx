@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router'
-import App from '@/App';
 import { Home, Room, SignIn, SignUp } from '@/pages'
+import { Gate } from '@/components';
+import CreateRoom from '@/pages/CreateRoom';
 
 const AppRoutes = () => {
     return (
@@ -9,8 +10,9 @@ const AppRoutes = () => {
                 <Route path="/" element={<Home />} />
                 <Route path="/sign-in" element={<SignIn />} />
                 <Route path="/sign-up" element={<SignUp />} />
-                <Route path="play" element={<App />}>
-                    <Route path="r/:id" element={<Room />} />
+                <Route element={<Gate />}>
+                    <Route path="/rooms/new" element={<CreateRoom />} />
+                    <Route path="/room/:code" element={<Room />} />
                 </Route>
             </Routes>
         </Router>
